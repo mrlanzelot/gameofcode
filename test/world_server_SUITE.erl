@@ -171,7 +171,8 @@ test_world_server(_Config) ->
 
 test_register_opponent(_Config) ->
     [] = world_server:get_active_opponents(),
-    world_server:register_opponent(1000),
+    Pid = opponent:start(1000),
+    world_server:register_opponent(Pid),
     [Pid] = world_server:get_active_opponents(),
     true = is_process_alive(Pid).
 
