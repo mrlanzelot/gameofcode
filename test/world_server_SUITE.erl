@@ -166,21 +166,29 @@ end_per_testcase(TestCase, Config) ->
 test_world_server() ->
     [{userdata,[{doc,"Testing the world_server module"}]}].
 
-test_world_server(_Config) ->
-    {skip,"Not implemented."}.
-
 test_register_opponent(_Config) ->
     [] = world_server:get_active_opponents(),
-    Pid = opponent:start(1000),
-    world_server:register_opponent(Pid),
-    [Pid] = world_server:get_active_opponents(),
-    true = is_process_alive(Pid).
+    Kalle = kalle,
+    Kalle = opponent:start(Kalle, 1000),
+    world_server:register_opponent(Kalle),
+    [Kalle] = world_server:get_active_opponents().
 
 test_attack(_Config) ->
-    [Pid1] = world_server:register_opponent(100),
-    [Pid2,Pid1] = world_server:register_opponent(1000),
-    [Pid2,Pid1] = world_server:get_active_opponents(),
-    world_server:attack(1),
-    [Pid2] = world_server:get_active_opponents().
-    
+    % Create Opponents, they will be implicitly registered
+    Kalle = kalle,
+    Olle = olle,
+    Kalle = opponent:start(Kalle, 1000),
+    [Kalle] = world_server:get_active_opponents(),
+    Olle = opponent:start(Olle, 300),
+    [Olle,Kalle] = world_server:get_active_opponents(),
 
+    % Kalle attack Olle until Olle dies
+    opponent:attack(Kalle, Olle, 200),
+    timer:sleep(1000), % Wait for Olle to digest the attack
+    [Olle,Kalle] = world_server:get_active_opponents(),
+
+    opponent:attack(Kalle, Olle, 200),
+    % Olle has received the attack, but has not died yet
+    [Olle,Kalle] = world_server:get_active_opponents(), 
+    timer:sleep(1000), % Wait for Olle to die
+    [Kalle] = world_server:get_active_opponents().
