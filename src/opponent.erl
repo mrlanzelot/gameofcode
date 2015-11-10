@@ -5,30 +5,36 @@
 -compile(export_all).
 -behaviour(gen_server).
 
--record(state, {health = 1000}).
+-record(state, {name, health}).
     
 % Client side 
-start(Health) ->
-    {ok, Pid} = gen_server:start_link(opponent, Health, []),
-    Pid.
+start(Name, Health) ->
+    {ok, _Pid} = gen_server:start_link({global,Name}, ?MODULE, {Name, Health}, []),
+    Name.
 
-handle_attack(Pid, Damage) ->
-    gen_server:cast(Pid, {handle_attack, Damage}).
+attack(MyName, OpponentName, Damage) ->
+    say("~p attack ~p~n",[global:whereis_name(MyName), global:whereis_name(OpponentName)]),
+    gen_server:call({global, MyName}, {attack, OpponentName, Damage}).
 
-attack(MyPid, OpponentPid, Damage) ->
-    gen_server:cast(MyPid, {attack, OpponentPid, Damage}).
+handle_attack(ReceiverName, Damage) ->
+    say("~p received ~p damage~n", [global:whereis_name(ReceiverName), Damage]),
+    gen_server:cast({global, ReceiverName}, {handle_attack, Damage}).
 
-report_health(Pid) ->
-    gen_server:call(Pid, report_health).
+report_health(Name) ->
+    gen_server:call({global, Name}, report_health).
 
  % - - - - -- -- - - - - --- - - --- - - -
 
 % Server side
 
-init(Health) ->
-    say("init(~p)~n",[Health]),
-    %process_flag(trap_exit, true),
-    {ok, #state{health = Health}}.
+init({Name, Health}) ->
+    say("init({~p,~p})~n",[Name,Health]),
+    % Register user to world_server
+    say("Before world_server:register~n"),
+    ok = gen_server:call({global, world_server}, {register_opponent, Name}),
+    say("After world_server:register~n"),
+    {ok, #state{name = Name,
+		health = Health}}.
 
 terminate(Reason, State) ->
     say("Just died with reason ~p, state = ~p~n", 
@@ -40,7 +46,7 @@ handle_cast({handle_attack, Damage},
 	[State#state.health]),	
     NewState = State#state{health = PreviousHealth - Damage},
     
-    heal(Damage * 100),
+    manage(Damage * 100),
     
     say("Health after shoot : ~p~n",
 	[NewState#state.health]),
@@ -48,13 +54,20 @@ handle_cast({handle_attack, Damage},
 	    {noreply, NewState};
        true ->
 	    {stop, normal, NewState}
-    end;
+    end.
 
-handle_cast({attack, OpponentPid, Damage}, State) ->
-    say("Attacking ~p~n",[OpponentPid]),
-    heal(10),
-    opponent:handle_attack(OpponentPid, Damage),
-    {noreply, State}.
+handle_call({attack, OpponentName, Damage}, _From, State) ->
+    case global:whereis_name(OpponentName) of
+	undefined ->
+	    say("attack to unregistered opponent ~p~nRegistered opponents: ~p",
+		[global:whereis_name(OpponentName), world_server:get_registered_opponents()]),
+	    {reply, opponent_not_registered, State};
+	_Pid ->
+	    say("Attacking ~p~n",[OpponentName]),
+	    manage(10),
+	    opponent:handle_attack(OpponentName, Damage),
+	    {reply, ok, State}
+    end;
 
 handle_call(report_health, _From, State)->
     say("~p healthstatus: ~p~n",[self(), State#state.health]),
@@ -85,18 +98,11 @@ say(Format, Data) ->
 
 
 %%-----------------------------------------------------------------------------
-%%Lord Heal Master
+%% manage(Work) will consume CPU to simulate work
 %%----------------------------------------------------------------------------
-heal(Damage) ->
-    tail_heal(Damage).
+manage(Work) ->
+    tail_heal_h(Work,0,0,0).
 
-heal_p(0)->0;
-heal_p(1)->1;
-heal_p(N)->heal_p(N-1)+heal_p(N-2).
-%% with guards
-heal_g(N) when N == 0 ->0;
-heal_g(N) when N == 1->1;
-heal_g(N) when N >= 2 -> heal_g(N-1)+heal_g(N-2).
 %% tail recursion
 tail_heal_h(End,N,Lastheal,SecondLastheal) ->
   case N of
@@ -105,5 +111,15 @@ tail_heal_h(End,N,Lastheal,SecondLastheal) ->
     1 -> tail_heal_h(End, 2, 1, 0) ;
     _ -> tail_heal_h(End,N+1,SecondLastheal+Lastheal,Lastheal)
   end.
-tail_heal(N)->
-     tail_heal_h(N,0,0,0).
+
+%---------------------------
+show_progress_bar(Sleep) ->
+    Resolution = 10,
+    show_progress_bar(round(Sleep/Resolution),Resolution).
+
+show_progress_bar(_Sleep, 0) ->
+    io:format("~n");
+show_progress_bar(Sleep, Count) ->
+    timer:sleep(Sleep),
+    io:format("."),
+    show_progress_bar(Sleep,Count-1).
