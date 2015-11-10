@@ -2,7 +2,8 @@
 -compile(export_all).
 -behaviour(gen_server).
 
--record(state, {status = register_opponents, opponents = []}).
+-define(register_opponents, register_opponents).
+-record(state, {status = ?register_opponents, opponents = []}).
 
 % Client side 
 start(_Type, _Args) ->
@@ -18,28 +19,15 @@ start_battle() ->
 stop_battle() ->
     ok.
 
-register_opponent(Pid) ->
-    gen_server:call({global,?MODULE}, {register_opponent, Pid}).
+register_opponent(Name) ->
+    gen_server:call({global,?MODULE}, {register_opponent, Name}).
 
 get_active_opponents() ->
     gen_server:call({global,?MODULE}, get_active_opponents).
 
-attack(0) ->
-    ok;
-attack(Tick) ->
-    gen_server:call({global,?MODULE}, attack),
-    say("Let's see who survives this attack~n"),
-    show_progress_bar(1000),
-    RemainingOpponents = gen_server:call({global,?MODULE}, get_active_opponents),
-    say("Remaining opponents: ~p~n",[RemainingOpponents]),
-    attack(Tick-1).
-
- % - - - - -- -- - - - - --- - - --- - - -
-
 % Server side
 init(_Arg) ->
     say("The Game of Code is ready to register opponents~n"),
-    %process_flag(trap_exit, true),
     {ok, #state{status = opponents}}.
 
 handle_call(start_battle, _From, State) ->
@@ -47,28 +35,28 @@ handle_call(start_battle, _From, State) ->
     say("The following opponents are registered: ~p~nLet the battle begin!!!~n",[Opponents]),
     {reply, Opponents, State#state{status = started}};
 
-handle_call({register_opponent, Pid}, _From, State) ->% when State#state.status == registered_opponents ->
+handle_call({register_opponent, Name}, {FromPid,_FromTag}, State) ->
     Opponents = State#state.opponents,
-    say("Registered opponents: ~p~n",[Opponents]),
-    NewOpponents = [Pid| Opponents],
-    say("After add: ~p~n",[NewOpponents]),
-     {reply, NewOpponents, State#state{opponents = NewOpponents}};
+    say("Before add: ~p~n",[Opponents]),
 
+    %% Validate that Name is not already registered and that it's the 
+    %% caller pid is associated with the registration name
+    case {lists:member(Name, Opponents), global:whereis_name(Name)} of
+	{false, FromPid} ->
+	    NewOpponents = [Name | Opponents],
+	    say("After add: ~p~n",[NewOpponents]),
+	    {reply, ok, State#state{opponents = NewOpponents}};
+	{true, _} ->
+	    {reply, {error, name_already_registered}, State};
+	{_, Pid} ->
+	    say("~p is not associated with the name ~p, but instead ~p~n",[FromPid,Name,Pid]),
+	    {reply, {error, name_not_associated_with_caller_pid}}
+    end;
+    
 handle_call(get_active_opponents, _From, #state{opponents = Opponents} = State)->
-%    Opponents = State#state.opponents,
     ActiveOpponents = [Opponent||Opponent <- Opponents, 
-				 is_process_alive(Opponent)],
+				 global:whereis_name(Opponent) =/= undefined],
     {reply, ActiveOpponents, State#state{opponents = ActiveOpponents}};
-
-handle_call(attack, _From, State) ->
-    Opponents = State#state.opponents,
-    Attack = fun(A,B) -> 
-                    opponent:attack(A, B, 200),
-		    say("~p is attacking ~p~n",[A, B])
-     end,
-    [Attack(A,B)|| A <- Opponents, B <- Opponents, A /= B],
-
-    {reply, attack_ended, State};
 
 handle_call(stop, _From, State)->
     say("Thanks for playing, we are closing this session~n"),
